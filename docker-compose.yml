@@ -1,0 +1,38 @@
+services:
+  krakend:
+    image: krakend:2.13
+    command: ["run", "-c", "/etc/krakend/krakend.json"]
+    ports:
+      - "8080:8080"
+    volumes:
+      - ./krakend/krakend.json:/etc/krakend/krakend.json:ro
+      - ./krakend/lua:/etc/krakend/lua:ro
+    depends_on:
+      - web
+      - svc_a
+      - svc_b
+      - svc_c
+
+  web:
+    build:
+      context: ./web
+    expose:
+      - "8000"
+
+  svc_a:
+    build:
+      context: ./svc_a
+    expose:
+      - "8000"
+
+  svc_b:
+    build:
+      context: ./svc_b
+    expose:
+      - "8000"
+
+  svc_c:
+    build:
+      context: ./svc_c
+    expose:
+      - "8000"

@@ -1,0 +1,193 @@
+{
+  "version": 3,
+  "name": "KrakenD Lua clientId routing demo",
+  "port": 8080,
+  "timeout": "3s",
+  "cache_ttl": "300s",
+  "extra_config": {
+    "router": {
+      "return_error_msg": true
+    }
+  },
+  "endpoints": [
+    {
+      "endpoint": "/",
+      "method": "GET",
+      "output_encoding": "no-op",
+      "backend": [
+        {
+          "url_pattern": "/",
+          "encoding": "no-op",
+          "host": [
+            "http://web:8000"
+          ]
+        }
+      ]
+    },
+    {
+      "endpoint": "/api/route",
+      "method": "GET",
+      "output_encoding": "no-op",
+      "input_query_strings": [
+        "clientId",
+        "op"
+      ],
+      "extra_config": {
+        "modifier/lua-proxy": {
+          "sources": [
+            "/etc/krakend/lua/route.lua"
+          ],
+          "allow_open_libs": true,
+          "post": "route_decision_json(request.load(), response.load())"
+        }
+      },
+      "backend": [
+        {
+          "url_pattern": "/__krakend_noop",
+          "encoding": "no-op",
+          "host": [
+            "http://svc_b:8000"
+          ]
+        }
+      ]
+    },
+    {
+      "endpoint": "/api/route_decision",
+      "method": "GET",
+      "output_encoding": "no-op",
+      "input_query_strings": [
+        "clientId",
+        "op"
+      ],
+      "extra_config": {
+        "modifier/lua-proxy": {
+          "sources": [
+            "/etc/krakend/lua/route.lua"
+          ],
+          "allow_open_libs": true,
+          "post": "route_decision_json(request.load(), response.load())"
+        }
+      },
+      "backend": [
+        {
+          "url_pattern": "/__krakend_noop",
+          "encoding": "no-op",
+          "host": [
+            "http://svc_b:8000"
+          ]
+        }
+      ]
+    },
+    {
+      "endpoint": "/api/a/{path}",
+      "method": "GET",
+      "output_encoding": "no-op",
+      "input_query_strings": [
+        "*"
+      ],
+      "backend": [
+        {
+          "url_pattern": "/{path}",
+          "encoding": "no-op",
+          "host": [
+            "http://svc_a:8000"
+          ]
+        }
+      ]
+    },
+    {
+      "endpoint": "/api/a/{path}",
+      "method": "POST",
+      "output_encoding": "no-op",
+      "input_query_strings": [
+        "*"
+      ],
+      "input_headers": [
+        "Content-Type"
+      ],
+      "backend": [
+        {
+          "url_pattern": "/{path}",
+          "encoding": "no-op",
+          "host": [
+            "http://svc_a:8000"
+          ]
+        }
+      ]
+    },
+    {
+      "endpoint": "/api/b/{path}",
+      "method": "GET",
+      "output_encoding": "no-op",
+      "input_query_strings": [
+        "*"
+      ],
+      "backend": [
+        {
+          "url_pattern": "/{path}",
+          "encoding": "no-op",
+          "host": [
+            "http://svc_b:8000"
+          ]
+        }
+      ]
+    },
+    {
+      "endpoint": "/api/b/{path}",
+      "method": "POST",
+      "output_encoding": "no-op",
+      "input_query_strings": [
+        "*"
+      ],
+      "input_headers": [
+        "Content-Type"
+      ],
+      "backend": [
+        {
+          "url_pattern": "/{path}",
+          "encoding": "no-op",
+          "host": [
+            "http://svc_b:8000"
+          ]
+        }
+      ]
+    },
+    {
+      "endpoint": "/api/c/{path}",
+      "method": "GET",
+      "output_encoding": "no-op",
+      "input_query_strings": [
+        "*"
+      ],
+      "backend": [
+        {
+          "url_pattern": "/{path}",
+          "encoding": "no-op",
+          "host": [
+            "http://svc_c:8000"
+          ]
+        }
+      ]
+    },
+    {
+      "endpoint": "/api/c/{path}",
+      "method": "POST",
+      "output_encoding": "no-op",
+      "input_query_strings": [
+        "*"
+      ],
+      "input_headers": [
+        "Content-Type"
+      ],
+      "backend": [
+        {
+          "url_pattern": "/{path}",
+          "encoding": "no-op",
+          "host": [
+            "http://svc_c:8000"
+          ]
+        }
+      ]
+    }
+  ]
+}

@@ -1,0 +1,222 @@
+// Шпаргалка по конфигу KrakenD.
+// Этот файл предназначен только для чтения человеком.
+// Его НЕЛЬЗЯ запускать как конфигурацию KrakenD, т.к. здесь есть комментарии.
+{
+  "version": 3, // версия схемы конфигурации KrakenD
+
+  "name": "KrakenD Lua clientId routing demo", // произвольное имя инстанса шлюза
+
+  "port": 8080, // порт HTTP, на котором слушает KrakenD
+
+  "timeout": "3s", // общий таймаут запросов к бэкендам
+
+  "cache_ttl": "300s", // время жизни кэша ответов бекенда
+
+  "extra_config": {
+    "router": {
+      "return_error_msg": true // при ошибках возвращать текст ошибки клиенту
+    }
+  },
+
+  // =========================
+  // ВНЕШНИЕ ЭНДПОИНТЫ API
+  // =========================
+  "endpoints": [
+    {
+      // ----------- /
+      // Корень, обычно фронтенд (web UI)
+      "endpoint": "/",
+      "method": "GET",
+      "output_encoding": "no-op", // не перекодировать ответ
+      "backend": [
+        {
+          "url_pattern": "/", // путь на бекенде
+          "encoding": "no-op",
+          "host": [
+            "http://web:8000" // сервис web (фронтенд)
+          ]
+        }
+      ]
+    },
+    {
+      // ----------- /api/route
+      // Эндпоинт, который использует Lua‑скрипт для принятия решения по clientId/op.
+      "endpoint": "/api/route",
+      "method": "GET",
+      "output_encoding": "no-op",
+      "input_query_strings": [
+        "clientId", // ID клиента
+        "op"       // операция
+      ],
+      "extra_config": {
+        "modifier/lua-proxy": {
+          "sources": [
+            "/etc/krakend/lua/route.lua" // основной Lua‑скрипт
+          ],
+          "allow_open_libs": true, // разрешить стандартные библиотеки Lua
+          "post": "route_decision_json(request.load(), response.load())"
+          // post-фильтр: вызывается после ответа бекенда
+        }
+      },
+      "backend": [
+        {
+          "url_pattern": "/__krakend_noop", // технический no-op эндпоинт
+          "encoding": "no-op",
+          "host": [
+            "http://svc_b:8000" // сервис B, но логика вся в Lua
+          ]
+        }
+      ]
+    },
+    {
+      // ----------- /api/route_decision
+      // Аналогичный Lua‑эндпоинт, отдельный URL.
+      "endpoint": "/api/route_decision",
+      "method": "GET",
+      "output_encoding": "no-op",
+      "input_query_strings": [
+        "clientId",
+        "op"
+      ],
+      "extra_config": {
+        "modifier/lua-proxy": {
+          "sources": [
+            "/etc/krakend/lua/route.lua"
+          ],
+          "allow_open_libs": true,
+          "post": "route_decision_json(request.load(), response.load())"
+        }
+      },
+      "backend": [
+        {
+          "url_pattern": "/__krakend_noop",
+          "encoding": "no-op",
+          "host": [
+            "http://svc_b:8000"
+          ]
+        }
+      ]
+    },
+    {
+      // ----------- /api/a/{path} (GET)
+      // Проксирование любых путей на сервис A.
+      "endpoint": "/api/a/{path}",
+      "method": "GET",
+      "output_encoding": "no-op",
+      "input_query_strings": [
+        "*" // пробросить все query‑параметры как есть
+      ],
+      "backend": [
+        {
+          "url_pattern": "/{path}", // тот же путь на бекенде
+          "encoding": "no-op",
+          "host": [
+            "http://svc_a:8000" // сервис A
+          ]
+        }
+      ]
+    },
+    {
+      // ----------- /api/a/{path} (POST)
+      // POST‑прокси на сервис A, плюс проброс Content-Type.
+      "endpoint": "/api/a/{path}",
+      "method": "POST",
+      "output_encoding": "no-op",
+      "input_query_strings": [
+        "*"
+      ],
+      "input_headers": [
+        "Content-Type" // важен для корректной обработки тела запроса
+      ],
+      "backend": [
+        {
+          "url_pattern": "/{path}",
+          "encoding": "no-op",
+          "host": [
+            "http://svc_a:8000"
+          ]
+        }
+      ]
+    },
+    {
+      // ----------- /api/b/{path} (GET)
+      // Тонкий прокси на сервис B.
+      "endpoint": "/api/b/{path}",
+      "method": "GET",
+      "output_encoding": "no-op",
+      "input_query_strings": [
+        "*"
+      ],
+      "backend": [
+        {
+          "url_pattern": "/{path}",
+          "encoding": "no-op",
+          "host": [
+            "http://svc_b:8000" // сервис B
+          ]
+        }
+      ]
+    },
+    {
+      // ----------- /api/b/{path} (POST)
+      "endpoint": "/api/b/{path}",
+      "method": "POST",
+      "output_encoding": "no-op",
+      "input_query_strings": [
+        "*"
+      ],
+      "input_headers": [
+        "Content-Type"
+      ],
+      "backend": [
+        {
+          "url_pattern": "/{path}",
+          "encoding": "no-op",
+          "host": [
+            "http://svc_b:8000"
+          ]
+        }
+      ]
+    },
+    {
+      // ----------- /api/c/{path} (GET)
+      // Аналогичные правила, но для сервиса C.
+      "endpoint": "/api/c/{path}",
+      "method": "GET",
+      "output_encoding": "no-op",
+      "input_query_strings": [
+        "*"
+      ],
+      "backend": [
+        {
+          "url_pattern": "/{path}",
+          "encoding": "no-op",
+          "host": [
+            "http://svc_c:8000" // сервис C
+          ]
+        }
+      ]
+    },
+    {
+      // ----------- /api/c/{path} (POST)
+      "endpoint": "/api/c/{path}",
+      "method": "POST",
+      "output_encoding": "no-op",
+      "input_query_strings": [
+        "*"
+      ],
+      "input_headers": [
+        "Content-Type"
+      ],
+      "backend": [
+        {
+          "url_pattern": "/{path}",
+          "encoding": "no-op",
+          "host": [
+            "http://svc_c:8000"
+          ]
+        }
+      ]
+    }
+  ]
+}
