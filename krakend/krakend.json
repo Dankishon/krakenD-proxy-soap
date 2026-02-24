@@ -11,6 +11,45 @@
     "router": {
       "return_error_msg": true
     },
+    "telemetry/opentelemetry": {
+      "service_name": "krakend",
+      "trace_sample_rate": 100,
+      "skip_paths": [
+        "/__health"
+      ],
+      "layers": {
+        "global": {
+          "disable_metrics": true,
+          "disable_traces": false
+        },
+        "proxy": {
+          "disable_metrics": true,
+          "disable_traces": false,
+          "report_headers": true
+        },
+        "backend": {
+          "metrics": {
+            "disable_stage": true
+          },
+          "traces": {
+            "disable_stage": false,
+            "round_trip": true,
+            "report_headers": true
+          }
+        }
+      },
+      "exporters": {
+        "otlp": [
+          {
+            "name": "jaeger-otlp-http",
+            "host": "jaeger",
+            "port": 4318,
+            "use_http": true,
+            "disable_metrics": true
+          }
+        ]
+      }
+    },
     "plugin/http-server": {
       "name": [
         "soap-graphql-plugin"

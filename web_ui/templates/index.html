@@ -82,6 +82,17 @@
       flex-wrap: wrap;
     }
 
+    .link-btn {
+      text-decoration: none;
+      color: #fff;
+      font-weight: 700;
+      background: linear-gradient(135deg, #1d4ed8, #1e3a8a);
+      border-radius: 8px;
+      padding: 10px 14px;
+      font-size: 14px;
+      display: inline-block;
+    }
+
     .timeline {
       display: grid;
       grid-template-columns: 1fr 1fr;
@@ -145,7 +156,8 @@
       margin-bottom: 10px;
     }
 
-    .result-grid {
+    .result-grid,
+    .trace-grid {
       display: grid;
       grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
       gap: 10px;
@@ -158,6 +170,7 @@
       background: #fff;
       padding: 8px;
       font-size: 14px;
+      word-break: break-all;
     }
 
     @media (max-width: 900px) {
@@ -221,6 +234,22 @@
       </div>
     </div>
 
+    <div class="panel">
+      <h2>Трассировка (Jaeger)</h2>
+      <div class="trace-grid">
+        <div class="result-item"><strong>Trace ID (web-ui)</strong><div id="traceWeb">-</div></div>
+        <div class="result-item"><strong>Trace ID (krakend)</strong><div id="traceKrakend">-</div></div>
+        <div class="result-item"><strong>Trace ID (graphql-svc)</strong><div id="traceGraphql">-</div></div>
+      </div>
+      <div class="actions" style="margin-top: 12px;">
+        <a id="jaegerKrakend" class="link-btn" href="{{ jaeger_links.krakend }}" target="_blank" rel="noopener">Открыть krakend в Jaeger</a>
+        <a id="jaegerGraphql" class="link-btn" href="{{ jaeger_links.graphql }}" target="_blank" rel="noopener">Открыть graphql-svc в Jaeger</a>
+        <a id="jaegerWebUi" class="link-btn" href="{{ jaeger_links.web_ui }}" target="_blank" rel="noopener">Открыть web-ui в Jaeger</a>
+      </div>
+      <p class="muted">Jaeger UI: {{ jaeger_ui_url }}. Если ссылка на конкретный trace недоступна, ищите по сервису и времени запроса.</p>
+      <p class="muted">Важно: browser DevTools не покажет server-to-server вызов KrakenD -> GraphQL, его нужно смотреть в Jaeger.</p>
+    </div>
+
     <div class="panel" id="mappingPanel" style="display:none;">
       <h2>Таблица маппинга</h2>
       <h3>Маппинг входа (SOAP -> GraphQL variables)</h3>
@@ -278,6 +307,14 @@
     const errorsBox = document.getElementById("errorsBox");
     const resultGrid = document.getElementById("resultGrid");
 
+    const traceWeb = document.getElementById("traceWeb");
+    const traceKrakend = document.getElementById("traceKrakend");
+    const traceGraphql = document.getElementById("traceGraphql");
+
+    const jaegerKrakend = document.getElementById("jaegerKrakend");
+    const jaegerGraphql = document.getElementById("jaegerGraphql");
+    const jaegerWebUi = document.getElementById("jaegerWebUi");
+
     const clientIdEl = document.getElementById("clientId");
     const firstNameEl = document.getElementById("firstName");
     const lastNameEl = document.getElementById("lastName");
@@ -320,6 +357,22 @@
       }
     }
 
+    function renderTracing(tracing, responseTraceId) {
+      const webTrace = (tracing && tracing.traceId) || responseTraceId || "-";
+      const krakendTrace = (tracing && tracing.krakendTraceId) || "-";
+      const graphqlTrace = (tracing && tracing.graphqlTraceId) || "-";
+
+      traceWeb.textContent = webTrace;
+      traceKrakend.textContent = krakendTrace;
+      traceGraphql.textContent = graphqlTrace;
+
+      if (tracing && tracing.jaeger) {
+        jaegerKrakend.href = tracing.jaeger.krakend || jaegerKrakend.href;
+        jaegerGraphql.href = tracing.jaeger.graphql || jaegerGraphql.href;
+        jaegerWebUi.href = tracing.jaeger.web_ui || jaegerWebUi.href;
+      }
+    }
+
     async function runDebug() {
       const payload = values();
       stepSoap.value = buildSoap(payload);
@@ -333,14 +386,16 @@
           body: JSON.stringify(payload)
         });
         const data = await resp.json();
+        const responseTraceId = resp.headers.get("x-trace-id") || "";
 
-        statusBox.textContent = `HTTP SOAP: ${data.soapStatus}, HTTP GraphQL: ${data.graphqlStatus}`;
+        statusBox.textContent = `HTTP SOAP: ${data.soapStatus}, HTTP GraphQL: ${data.graphqlStatus}, Trace ID: ${responseTraceId || "n/a"}`;
         stepSoap.value = data.soapRequest || "";
         stepGraphql.value = JSON.stringify(data.graphqlRequest || {}, null, 2);
         stepGraphqlResp.value = JSON.stringify(data.graphqlResponse || {}, null, 2);
         stepSoapResp.value = data.soapResponse || "";
         errorsBox.textContent = JSON.stringify(data.errors || [], null, 2);
         renderResult(data.result || {});
+        renderTracing(data.tracing || {}, responseTraceId);
       } catch (err) {
         statusBox.textContent = `Ошибка: ${err.message}`;
         errorsBox.textContent = err.message;
@@ -362,6 +417,7 @@
     stepGraphqlResp.value = "";
     errorsBox.textContent = "[]";
     renderResult({});
+    renderTracing({}, "");
   </script>
 </body>
 </html>

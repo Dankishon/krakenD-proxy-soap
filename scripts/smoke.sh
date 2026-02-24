@@ -69,4 +69,9 @@ fi
 grep -q "<soapenv:Fault>" "$ERR_FILE"
 grep -q "GraphQL error" "$ERR_FILE"
 
+echo "[smoke] waiting 2s for traces export"
+sleep 2
+
 echo "[smoke] all checks passed"
+echo "[smoke] Откройте Jaeger UI: http://localhost:16686"
+echo "[smoke] В поиске выберите service=krakend или service=graphql-svc и интервал Last 15 minutes"

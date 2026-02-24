@@ -238,25 +238,30 @@ func handleSOAPRequest(
 	mapping mappingSpec,
 	gqlQuery string,
 ) {
+	traceID := extractTraceID(req.Header)
+	if traceID != "" {
+		w.Header().Set("X-Trace-Id", traceID)
+	}
+
 	soapBody, err := io.ReadAll(io.LimitReader(req.Body, 1<<20))
 	if err != nil {
-		writeSOAPFault(w, http.StatusBadRequest, "не удалось прочитать SOAP тело")
+		writeSOAPFault(w, http.StatusBadRequest, "не удалось прочитать SOAP тело", traceID)
 		return
 	}
 	if len(bytes.TrimSpace(soapBody)) == 0 {
-		writeSOAPFault(w, http.StatusBadRequest, "SOAP тело пустое")
+		writeSOAPFault(w, http.StatusBadRequest, "SOAP тело пустое", traceID)
 		return
 	}
 
 	input, err := parseSOAPInput(soapBody)
 	if err != nil {
-		writeSOAPFault(w, http.StatusBadRequest, "некорректный SOAP запрос: "+err.Error())
+		writeSOAPFault(w, http.StatusBadRequest, "некорректный SOAP запрос: "+err.Error(), traceID)
 		return
 	}
 
 	variables, err := buildVariables(input, mapping)
 	if err != nil {
-		writeSOAPFault(w, http.StatusBadRequest, "ошибка маппинга входа: "+err.Error())
+		writeSOAPFault(w, http.StatusBadRequest, "ошибка маппинга входа: "+err.Error(), traceID)
 		return
 	}
 
@@ -265,24 +270,28 @@ func handleSOAPRequest(
 		"variables": variables,
 	})
 	if err != nil {
-		writeSOAPFault(w, http.StatusInternalServerError, "ошибка сборки GraphQL запроса")
+		writeSOAPFault(w, http.StatusInternalServerError, "ошибка сборки GraphQL запроса", traceID)
 		return
 	}
 
-	gqlRespBody, gqlStatus, err := callGraphQL(req.Context(), client, cfg.GraphQLURL, gqlPayload)
+	gqlRespBody, gqlStatus, err := callGraphQL(req.Context(), client, cfg.GraphQLURL, gqlPayload, req.Header)
 	if err != nil {
-		writeSOAPFault(w, http.StatusInternalServerError, "ошибка вызова GraphQL: "+err.Error())
+		writeSOAPFault(w, http.StatusInternalServerError, "ошибка вызова GraphQL: "+err.Error(), traceID)
 		return
 	}
 	if gqlStatus < 200 || gqlStatus >= 300 {
-		writeSOAPFault(w, http.StatusInternalServerError, fmt.Sprintf("GraphQL вернул HTTP %d", gqlStatus))
+		writeSOAPFault(w, http.StatusInternalServerError, fmt.Sprintf("GraphQL вернул HTTP %d", gqlStatus), traceID)
 		return
 	}
 
 	soapFields, err := mapGraphQLToSOAP(gqlRespBody, mapping)
 	if err != nil {
-		writeSOAPFault(w, http.StatusInternalServerError, err.Error())
+		writeSOAPFault(w, http.StatusInternalServerError, err.Error(), traceID)
 		return
+	}
+
+	if traceID != "" {
+		logger.Info(fmt.Sprintf("[soap-graphql-plugin] clientId=%d requestId=%s trace_id=%s", input.ClientID, input.RequestID, traceID))
 	}
 
 	result := buildSOAPResponse(soapFields)
@@ -377,12 +386,19 @@ func buildVariables(input soapInput, mapping mappingSpec) (map[string]interface{
 	return variables, nil
 }
 
-func callGraphQL(ctx context.Context, client *http.Client, url string, payload []byte) ([]byte, int, error) {
+func callGraphQL(
+	ctx context.Context,
+	client *http.Client,
+	url string,
+	payload []byte,
+	incomingHeaders http.Header,
+) ([]byte, int, error) {
 	httpReq, err := http.NewRequestWithContext(ctx, http.MethodPost, url, bytes.NewReader(payload))
 	if err != nil {
 		return nil, 0, err
 	}
 	httpReq.Header.Set("Content-Type", "application/json")
+	propagateTraceHeaders(httpReq.Header, incomingHeaders)
 
 	resp, err := client.Do(httpReq)
 	if err != nil {
@@ -489,9 +505,12 @@ func buildSOAPResponse(fields map[string]string) string {
 	return b.String()
 }
 
-func writeSOAPFault(w http.ResponseWriter, status int, message string) {
+func writeSOAPFault(w http.ResponseWriter, status int, message string, traceID string) {
 	fault := buildSOAPFault(message)
 	w.Header().Set("Content-Type", soapContentType)
+	if traceID != "" {
+		w.Header().Set("X-Trace-Id", traceID)
+	}
 	w.WriteHeader(status)
 	_, _ = w.Write([]byte(fault))
 }
@@ -508,6 +527,43 @@ func buildSOAPFault(message string) string {
 	b.WriteString("  </soapenv:Body>\n")
 	b.WriteString("</soapenv:Envelope>\n")
 	return b.String()
+}
+
+func propagateTraceHeaders(dst http.Header, src http.Header) {
+	for _, key := range []string{"traceparent", "tracestate", "baggage"} {
+		value := strings.TrimSpace(src.Get(key))
+		if value != "" {
+			dst.Set(key, value)
+		}
+	}
+
+	traceID := extractTraceID(src)
+	if traceID != "" {
+		dst.Set("X-Trace-Id", traceID)
+	}
+}
+
+func extractTraceID(headers http.Header) string {
+	if custom := strings.TrimSpace(headers.Get("X-Trace-Id")); custom != "" {
+		return custom
+	}
+
+	traceparent := strings.TrimSpace(headers.Get("traceparent"))
+	if traceparent == "" {
+		return ""
+	}
+
+	parts := strings.Split(traceparent, "-")
+	if len(parts) < 4 {
+		return ""
+	}
+
+	traceID := strings.ToLower(strings.TrimSpace(parts[1]))
+	if len(traceID) != 32 {
+		return ""
+	}
+
+	return traceID
 }
 
 func escapeXML(value string) string {

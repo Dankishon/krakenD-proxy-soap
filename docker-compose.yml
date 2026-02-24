@@ -1,4 +1,15 @@
 services:
+  jaeger:
+    image: jaegertracing/all-in-one:latest
+    environment:
+      COLLECTOR_OTLP_ENABLED: "true"
+    ports:
+      - "16686:16686"
+      - "4317:4317"
+      - "4318:4318"
+      - "14268:14268"
+      - "14250:14250"
+
   krakend:
     platform: linux/amd64
     build:
@@ -7,22 +18,31 @@ services:
     ports:
       - "8080:8080"
     depends_on:
+      - jaeger
       - graphql_svc
 
   graphql_svc:
     build:
       context: ./graphql_svc
+    environment:
+      OTLP_HTTP_ENDPOINT: http://jaeger:4318
+      OTEL_SERVICE_NAME: graphql-svc
     expose:
       - "8000"
+    depends_on:
+      - jaeger
 
   svc_a:
     build:
       context: ./svc_a
     environment:
       KRAKEND_URL: http://krakend:8080/soap/cx
+      OTLP_HTTP_ENDPOINT: http://jaeger:4318
+      OTEL_SERVICE_NAME: svc-a
     ports:
       - "8001:8001"
     depends_on:
+      - jaeger
       - krakend
 
   web_ui:
@@ -32,10 +52,14 @@ services:
       KRAKEND_URL: http://krakend:8080/soap/cx
       GRAPHQL_URL: http://graphql_svc:8000/graphql
       MAPPING_FILE: /app/mapping.json
+      JAEGER_UI_URL: http://localhost:16686
+      OTLP_HTTP_ENDPOINT: http://jaeger:4318
+      OTEL_SERVICE_NAME: web-ui
     volumes:
       - ./mapping.json:/app/mapping.json:ro
     ports:
       - "8002:8002"
     depends_on:
+      - jaeger
       - krakend
       - graphql_svc

@@ -61,6 +61,12 @@
       <li><strong>{{ key }}</strong>: {{ value }}</li>
       {% endfor %}
     </ul>
+
+    <h2>Трассировка</h2>
+    <ul>
+      <li><strong>Trace ID (svc_a)</strong>: {{ result.trace_id }}</li>
+      <li><strong>Trace ID (krakend)</strong>: {{ result.upstream_trace_id }}</li>
+    </ul>
   </div>
   {% endif %}
 </body>

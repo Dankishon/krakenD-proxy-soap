@@ -1,13 +1,20 @@
 import json
+import logging
 import os
-import urllib.error
-import urllib.request
 import xml.etree.ElementTree as ET
 from html import escape
 
+import requests
 from fastapi import FastAPI, Request
-from fastapi.responses import HTMLResponse, JSONResponse
+from fastapi.responses import HTMLResponse, JSONResponse, Response
 from fastapi.templating import Jinja2Templates
+from opentelemetry import trace
+from opentelemetry.exporter.otlp.proto.http.trace_exporter import OTLPSpanExporter
+from opentelemetry.instrumentation.fastapi import FastAPIInstrumentor
+from opentelemetry.instrumentation.requests import RequestsInstrumentor
+from opentelemetry.sdk.resources import Resource
+from opentelemetry.sdk.trace import TracerProvider
+from opentelemetry.sdk.trace.export import BatchSpanProcessor
 
 SOAP_ENV_NS = "http://schemas.xmlsoap.org/soap/envelope/"
 SOAP_CX_NS = "urn:cx"
@@ -16,15 +23,12 @@ NS = {"soapenv": SOAP_ENV_NS, "cx": SOAP_CX_NS}
 KRAKEND_URL = os.getenv("KRAKEND_URL", "http://krakend:8080/soap/cx")
 GRAPHQL_URL = os.getenv("GRAPHQL_URL", "http://graphql_svc:8000/graphql")
 MAPPING_FILE = os.getenv("MAPPING_FILE", "/app/mapping.json")
-
-OUTPUT_ORDER = [
-    "clientId",
-    "requestId",
-    "status",
-    "fullName",
-    "score",
-    *[f"field{i:02d}" for i in range(1, 28)],
-]
+JAEGER_UI_URL = os.getenv("JAEGER_UI_URL", "http://localhost:16686").rstrip("/")
+OTLP_HTTP_ENDPOINT = os.getenv("OTLP_HTTP_ENDPOINT", "http://jaeger:4318")
+OTLP_TRACES_ENDPOINT = os.getenv(
+    "OTLP_TRACES_ENDPOINT", f"{OTLP_HTTP_ENDPOINT.rstrip('/')}/v1/traces"
+)
+SERVICE_NAME = os.getenv("OTEL_SERVICE_NAME", "web-ui")
 
 GRAPHQL_QUERY = """query GetCxData($clientId:Int!,$firstName:String!,$lastName:String!,$requestId:String!){
   getCxData(clientId:$clientId, firstName:$firstName, lastName:$lastName, requestId:$requestId){
@@ -63,8 +67,39 @@ GRAPHQL_QUERY = """query GetCxData($clientId:Int!,$firstName:String!,$lastName:S
   }
 }"""
 
+logging.basicConfig(level=logging.INFO)
+logger = logging.getLogger("web_ui")
+
 app = FastAPI(title="web_ui demo")
 templates = Jinja2Templates(directory="templates")
+
+
+def setup_telemetry() -> None:
+    resource = Resource.create({"service.name": SERVICE_NAME})
+    provider = TracerProvider(resource=resource)
+    exporter = OTLPSpanExporter(endpoint=OTLP_TRACES_ENDPOINT)
+    provider.add_span_processor(BatchSpanProcessor(exporter))
+    trace.set_tracer_provider(provider)
+
+    FastAPIInstrumentor.instrument_app(app)
+    RequestsInstrumentor().instrument()
+
+
+setup_telemetry()
+
+
+def current_trace_id() -> str:
+    span_context = trace.get_current_span().get_span_context()
+    if span_context and span_context.is_valid:
+        return f"{span_context.trace_id:032x}"
+    return ""
+
+
+def attach_trace_header(response: Response) -> str:
+    trace_id = current_trace_id()
+    if trace_id:
+        response.headers["X-Trace-Id"] = trace_id
+    return trace_id
 
 
 def load_mapping() -> dict:
@@ -97,18 +132,26 @@ def build_graphql_request(values: dict, mapping: dict) -> dict:
     return {"query": GRAPHQL_QUERY, "variables": variables}
 
 
-def post_text(url: str, body: str, content_type: str) -> tuple[int, str]:
-    req = urllib.request.Request(
-        url,
-        method="POST",
-        data=body.encode("utf-8"),
-        headers={"Content-Type": content_type},
-    )
+def post_text(url: str, body: str, content_type: str) -> tuple[int, str, dict[str, str]]:
+    headers = {"Content-Type": content_type}
+    trace_id = current_trace_id()
+    if trace_id:
+        headers["X-Trace-Id"] = trace_id
+
     try:
-        with urllib.request.urlopen(req, timeout=8) as resp:
-            return resp.status, resp.read().decode("utf-8", errors="replace")
-    except urllib.error.HTTPError as exc:
-        return exc.code, exc.read().decode("utf-8", errors="replace")
+        response = requests.post(url, data=body.encode("utf-8"), headers=headers, timeout=8)
+        return response.status_code, response.text, dict(response.headers)
+    except requests.RequestException as exc:
+        logger.exception("HTTP request failed url=%s", url)
+        return 502, f"Transport error: {exc}", {}
+
+
+def get_header(headers: dict[str, str], name: str) -> str:
+    target = name.lower()
+    for key, value in headers.items():
+        if key.lower() == target:
+            return value
+    return ""
 
 
 def parse_json(raw: str) -> dict:
@@ -134,6 +177,10 @@ def parse_key_values(soap_xml: str) -> dict:
     return result
 
 
+def jaeger_search_url(service_name: str) -> str:
+    return f"{JAEGER_UI_URL}/search?service={service_name}"
+
+
 @app.get("/", response_class=HTMLResponse)
 def index(request: Request):
     mapping = load_mapping()
@@ -147,25 +194,34 @@ def index(request: Request):
     input_rows = [{"soap": k, "graphql": v} for k, v in mapping["input"].items()]
     output_rows = [{"soap": k, "graphql": v} for k, v in mapping["output"].items()]
 
-    return templates.TemplateResponse(
+    response = templates.TemplateResponse(
         "index.html",
         {
             "request": request,
             "defaults": defaults,
             "soap_preview": soap_preview,
             "graphql_preview": gql_preview,
-            "mapping": mapping,
             "input_rows": input_rows,
             "output_rows": output_rows,
             "krakend_url": KRAKEND_URL,
             "graphql_url": GRAPHQL_URL,
+            "jaeger_ui_url": JAEGER_UI_URL,
+            "jaeger_links": {
+                "krakend": jaeger_search_url("krakend"),
+                "graphql": jaeger_search_url("graphql-svc"),
+                "web_ui": jaeger_search_url("web-ui"),
+            },
         },
     )
+    attach_trace_header(response)
+    return response
 
 
 @app.get("/mapping")
 def mapping_endpoint():
-    return JSONResponse(load_mapping())
+    response = JSONResponse(load_mapping())
+    attach_trace_header(response)
+    return response
 
 
 @app.post("/debug-run")
@@ -183,16 +239,28 @@ async def debug_run(request: Request):
     soap_request = build_soap_request(values["clientId"], values["firstName"], values["lastName"], values["requestId"])
     gql_request = build_graphql_request(values, mapping)
 
-    soap_status, soap_response = post_text(KRAKEND_URL, soap_request, "text/xml; charset=utf-8")
-    gql_status, gql_response_raw = post_text(
+    soap_status, soap_response, soap_headers = post_text(KRAKEND_URL, soap_request, "text/xml; charset=utf-8")
+    gql_status, gql_response_raw, gql_headers = post_text(
         GRAPHQL_URL,
         json.dumps(gql_request, ensure_ascii=False),
         "application/json",
     )
 
     gql_response = parse_json(gql_response_raw)
+    web_trace_id = current_trace_id()
+    krakend_trace_id = get_header(soap_headers, "X-Trace-Id")
+    graphql_trace_id = get_header(gql_headers, "X-Trace-Id")
 
-    return JSONResponse(
+    logger.info(
+        "debug-run soap_status=%s gql_status=%s trace_ids web=%s krakend=%s graphql=%s",
+        soap_status,
+        gql_status,
+        web_trace_id,
+        krakend_trace_id,
+        graphql_trace_id,
+    )
+
+    response = JSONResponse(
         {
             "soapRequest": soap_request,
             "graphqlRequest": gql_request,
@@ -202,5 +270,18 @@ async def debug_run(request: Request):
             "soapResponse": soap_response,
             "result": parse_key_values(soap_response),
             "errors": gql_response.get("errors", []),
+            "tracing": {
+                "traceId": web_trace_id,
+                "krakendTraceId": krakend_trace_id,
+                "graphqlTraceId": graphql_trace_id,
+                "jaeger": {
+                    "krakend": jaeger_search_url("krakend"),
+                    "graphql": jaeger_search_url("graphql-svc"),
+                    "svc_a": jaeger_search_url("svc-a"),
+                    "web_ui": jaeger_search_url("web-ui"),
+                },
+            },
         }
     )
+    attach_trace_header(response)
+    return response
