@@ -1,0 +1,67 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>svc_a: SOAP клиент</title>
+  <style>
+    body { font-family: Georgia, "Times New Roman", serif; margin: 24px; color: #1f2933; background: #f8fafc; }
+    .card { border: 1px solid #d1d5db; border-radius: 10px; padding: 16px; margin-bottom: 16px; background: #fff; }
+    .grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(180px, 1fr)); gap: 12px; }
+    label { font-weight: 700; display: block; margin-bottom: 4px; }
+    input { width: 100%; box-sizing: border-box; padding: 8px; font-size: 14px; }
+    button { margin-top: 12px; padding: 10px 14px; border: 0; border-radius: 8px; background: #0b5fff; color: #fff; cursor: pointer; }
+    pre { white-space: pre-wrap; word-break: break-word; background: #101820; color: #d8f3dc; border-radius: 8px; padding: 12px; overflow-x: auto; }
+    ul { margin: 8px 0 0; }
+    code { background: #eef2ff; padding: 1px 4px; border-radius: 4px; }
+  </style>
+</head>
+<body>
+  <h1>Legacy SOAP клиент (svc_a)</h1>
+  <p>KrakenD endpoint: <code>{{ krakend_url }}</code></p>
+
+  <div class="card">
+    <form method="post" action="/call">
+      <div class="grid">
+        <div>
+          <label>clientId</label>
+          <input type="number" name="clientId" value="{{ defaults.clientId }}" required>
+        </div>
+        <div>
+          <label>Имя</label>
+          <input type="text" name="firstName" value="{{ defaults.firstName }}" required>
+        </div>
+        <div>
+          <label>Фамилия</label>
+          <input type="text" name="lastName" value="{{ defaults.lastName }}" required>
+        </div>
+        <div>
+          <label>requestId</label>
+          <input type="text" name="requestId" value="{{ defaults.requestId }}" required>
+        </div>
+      </div>
+      <button type="submit">Отправить SOAP запрос в KrakenD</button>
+    </form>
+  </div>
+
+  {% if result %}
+  <div class="card">
+    <h2>HTTP статус</h2>
+    <pre>{{ result.status }}</pre>
+
+    <h2>SOAP запрос</h2>
+    <pre>{{ result.soap_request }}</pre>
+
+    <h2>SOAP ответ</h2>
+    <pre>{{ result.soap_response }}</pre>
+
+    <h2>Расшифровка</h2>
+    <ul>
+      {% for key, value in result.decoded.items() %}
+      <li><strong>{{ key }}</strong>: {{ value }}</li>
+      {% endfor %}
+    </ul>
+  </div>
+  {% endif %}
+</body>
+</html>

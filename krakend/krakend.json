@@ -1,190 +1,44 @@
 {
   "version": 3,
-  "name": "KrakenD Lua clientId routing demo",
+  "name": "KrakenD SOAP to GraphQL to SOAP (Go plugin)",
   "port": 8080,
-  "timeout": "3s",
-  "cache_ttl": "300s",
+  "timeout": "6s",
+  "plugin": {
+    "pattern": ".so",
+    "folder": "/etc/krakend/plugins/"
+  },
   "extra_config": {
     "router": {
       "return_error_msg": true
+    },
+    "plugin/http-server": {
+      "name": [
+        "soap-graphql-plugin"
+      ],
+      "soap-graphql-plugin": {
+        "path": "/soap/cx",
+        "method": "POST",
+        "graphql_url": "http://graphql_svc:8000/graphql",
+        "mapping_file": "/etc/krakend/mapping.json",
+        "timeout_ms": 4500
+      }
     }
   },
   "endpoints": [
     {
-      "endpoint": "/",
-      "method": "GET",
-      "output_encoding": "no-op",
-      "backend": [
-        {
-          "url_pattern": "/",
-          "encoding": "no-op",
-          "host": [
-            "http://web:8000"
-          ]
-        }
-      ]
-    },
-    {
-      "endpoint": "/api/route",
-      "method": "GET",
-      "output_encoding": "no-op",
-      "input_query_strings": [
-        "clientId",
-        "op"
-      ],
-      "extra_config": {
-        "modifier/lua-proxy": {
-          "sources": [
-            "/etc/krakend/lua/route.lua"
-          ],
-          "allow_open_libs": true,
-          "post": "route_decision_json(request.load(), response.load())"
-        }
-      },
-      "backend": [
-        {
-          "url_pattern": "/__krakend_noop",
-          "encoding": "no-op",
-          "host": [
-            "http://svc_b:8000"
-          ]
-        }
-      ]
-    },
-    {
-      "endpoint": "/api/route_decision",
-      "method": "GET",
-      "output_encoding": "no-op",
-      "input_query_strings": [
-        "clientId",
-        "op"
-      ],
-      "extra_config": {
-        "modifier/lua-proxy": {
-          "sources": [
-            "/etc/krakend/lua/route.lua"
-          ],
-          "allow_open_libs": true,
-          "post": "route_decision_json(request.load(), response.load())"
-        }
-      },
-      "backend": [
-        {
-          "url_pattern": "/__krakend_noop",
-          "encoding": "no-op",
-          "host": [
-            "http://svc_b:8000"
-          ]
-        }
-      ]
-    },
-    {
-      "endpoint": "/api/a/{path}",
-      "method": "GET",
-      "output_encoding": "no-op",
-      "input_query_strings": [
-        "*"
-      ],
-      "backend": [
-        {
-          "url_pattern": "/{path}",
-          "encoding": "no-op",
-          "host": [
-            "http://svc_a:8000"
-          ]
-        }
-      ]
-    },
-    {
-      "endpoint": "/api/a/{path}",
+      "endpoint": "/soap/cx",
       "method": "POST",
       "output_encoding": "no-op",
-      "input_query_strings": [
-        "*"
-      ],
       "input_headers": [
-        "Content-Type"
+        "Content-Type",
+        "SOAPAction"
       ],
       "backend": [
         {
-          "url_pattern": "/{path}",
+          "url_pattern": "/graphql",
           "encoding": "no-op",
           "host": [
-            "http://svc_a:8000"
-          ]
-        }
-      ]
-    },
-    {
-      "endpoint": "/api/b/{path}",
-      "method": "GET",
-      "output_encoding": "no-op",
-      "input_query_strings": [
-        "*"
-      ],
-      "backend": [
-        {
-          "url_pattern": "/{path}",
-          "encoding": "no-op",
-          "host": [
-            "http://svc_b:8000"
-          ]
-        }
-      ]
-    },
-    {
-      "endpoint": "/api/b/{path}",
-      "method": "POST",
-      "output_encoding": "no-op",
-      "input_query_strings": [
-        "*"
-      ],
-      "input_headers": [
-        "Content-Type"
-      ],
-      "backend": [
-        {
-          "url_pattern": "/{path}",
-          "encoding": "no-op",
-          "host": [
-            "http://svc_b:8000"
-          ]
-        }
-      ]
-    },
-    {
-      "endpoint": "/api/c/{path}",
-      "method": "GET",
-      "output_encoding": "no-op",
-      "input_query_strings": [
-        "*"
-      ],
-      "backend": [
-        {
-          "url_pattern": "/{path}",
-          "encoding": "no-op",
-          "host": [
-            "http://svc_c:8000"
-          ]
-        }
-      ]
-    },
-    {
-      "endpoint": "/api/c/{path}",
-      "method": "POST",
-      "output_encoding": "no-op",
-      "input_query_strings": [
-        "*"
-      ],
-      "input_headers": [
-        "Content-Type"
-      ],
-      "backend": [
-        {
-          "url_pattern": "/{path}",
-          "encoding": "no-op",
-          "host": [
-            "http://svc_c:8000"
+            "http://graphql_svc:8000"
           ]
         }
       ]

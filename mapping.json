@@ -1,0 +1,42 @@
+{
+  "input": {
+    "clientId": "variables.clientId",
+    "firstName": "variables.firstName",
+    "lastName": "variables.lastName",
+    "requestId": "variables.requestId"
+  },
+  "output": {
+    "clientId": "data.getCxData.clientId",
+    "requestId": "data.getCxData.requestId",
+    "status": "data.getCxData.status",
+    "fullName": "data.getCxData.fullName",
+    "score": "data.getCxData.score",
+    "field01": "data.getCxData.field01",
+    "field02": "data.getCxData.field02",
+    "field03": "data.getCxData.field03",
+    "field04": "data.getCxData.field04",
+    "field05": "data.getCxData.field05",
+    "field06": "data.getCxData.field06",
+    "field07": "data.getCxData.field07",
+    "field08": "data.getCxData.field08",
+    "field09": "data.getCxData.field09",
+    "field10": "data.getCxData.field10",
+    "field11": "data.getCxData.field11",
+    "field12": "data.getCxData.field12",
+    "field13": "data.getCxData.field13",
+    "field14": "data.getCxData.field14",
+    "field15": "data.getCxData.field15",
+    "field16": "data.getCxData.field16",
+    "field17": "data.getCxData.field17",
+    "field18": "data.getCxData.field18",
+    "field19": "data.getCxData.field19",
+    "field20": "data.getCxData.field20",
+    "field21": "data.getCxData.field21",
+    "field22": "data.getCxData.field22",
+    "field23": "data.getCxData.field23",
+    "field24": "data.getCxData.field24",
+    "field25": "data.getCxData.field25",
+    "field26": "data.getCxData.field26",
+    "field27": "data.getCxData.field27"
+  }
+}

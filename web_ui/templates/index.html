@@ -1,0 +1,367 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Демо: SOAP -> KrakenD -> GraphQL -> SOAP</title>
+  <style>
+    :root {
+      --bg: #eef2ff;
+      --panel: #ffffff;
+      --line: #cbd5e1;
+      --text: #0f172a;
+      --accent: #0f766e;
+      --accent2: #115e59;
+      --code-bg: #111827;
+      --code-text: #e5e7eb;
+    }
+
+    * { box-sizing: border-box; }
+
+    body {
+      margin: 0;
+      background: radial-gradient(circle at top right, #bfdbfe 0%, var(--bg) 40%);
+      color: var(--text);
+      font-family: Georgia, "Times New Roman", serif;
+      line-height: 1.45;
+    }
+
+    .container {
+      max-width: 1220px;
+      margin: 0 auto;
+      padding: 24px;
+    }
+
+    .panel {
+      background: var(--panel);
+      border: 1px solid var(--line);
+      border-radius: 12px;
+      padding: 16px;
+      margin-bottom: 16px;
+      box-shadow: 0 10px 30px rgba(15, 23, 42, 0.07);
+    }
+
+    h1 { margin: 0 0 8px; }
+    h2 { margin: 0 0 12px; font-size: 21px; }
+
+    .grid {
+      display: grid;
+      grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+      gap: 12px;
+      margin-bottom: 12px;
+    }
+
+    label {
+      display: block;
+      font-weight: 700;
+      margin-bottom: 5px;
+    }
+
+    input, button, textarea {
+      width: 100%;
+      border: 1px solid #94a3b8;
+      border-radius: 8px;
+      padding: 9px;
+      font-size: 14px;
+      font-family: inherit;
+    }
+
+    button {
+      width: auto;
+      border: none;
+      color: #fff;
+      font-weight: 700;
+      background: linear-gradient(135deg, var(--accent), var(--accent2));
+      cursor: pointer;
+      padding: 10px 14px;
+    }
+
+    .actions {
+      display: flex;
+      gap: 10px;
+      flex-wrap: wrap;
+    }
+
+    .timeline {
+      display: grid;
+      grid-template-columns: 1fr 1fr;
+      gap: 12px;
+    }
+
+    .step {
+      border: 1px solid var(--line);
+      border-radius: 10px;
+      padding: 10px;
+      background: #f8fafc;
+    }
+
+    .step h3 {
+      margin: 0 0 8px;
+      font-size: 16px;
+    }
+
+    textarea, pre {
+      background: var(--code-bg);
+      color: var(--code-text);
+      border: 1px solid #374151;
+      border-radius: 8px;
+      font-family: "Courier New", monospace;
+      min-height: 180px;
+      white-space: pre;
+      overflow: auto;
+    }
+
+    textarea { resize: vertical; }
+    pre { margin: 0; padding: 10px; }
+
+    .muted {
+      color: #334155;
+      font-size: 14px;
+      margin: 4px 0 0;
+    }
+
+    table {
+      width: 100%;
+      border-collapse: collapse;
+      font-size: 14px;
+    }
+
+    th, td {
+      border: 1px solid var(--line);
+      text-align: left;
+      vertical-align: top;
+      padding: 8px;
+      background: #fff;
+    }
+
+    th { background: #f1f5f9; }
+
+    .status {
+      font-size: 14px;
+      padding: 8px 10px;
+      border-radius: 8px;
+      border: 1px solid #86efac;
+      background: #f0fdf4;
+      margin-bottom: 10px;
+    }
+
+    .result-grid {
+      display: grid;
+      grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
+      gap: 10px;
+      margin-top: 10px;
+    }
+
+    .result-item {
+      border: 1px solid var(--line);
+      border-radius: 8px;
+      background: #fff;
+      padding: 8px;
+      font-size: 14px;
+    }
+
+    @media (max-width: 900px) {
+      .timeline { grid-template-columns: 1fr; }
+      .container { padding: 12px; }
+    }
+  </style>
+</head>
+<body>
+  <div class="container">
+    <h1>KrakenD Go plugin demo</h1>
+    <p class="muted">Поток: SOAP -> KrakenD (Go plugin) -> GraphQL -> SOAP</p>
+
+    <div class="panel">
+      <h2>Ввод параметров (SOAP)</h2>
+      <div class="grid">
+        <div>
+          <label for="clientId">clientId</label>
+          <input id="clientId" type="number" value="{{ defaults.clientId }}">
+        </div>
+        <div>
+          <label for="firstName">Имя</label>
+          <input id="firstName" type="text" value="{{ defaults.firstName }}">
+        </div>
+        <div>
+          <label for="lastName">Фамилия</label>
+          <input id="lastName" type="text" value="{{ defaults.lastName }}">
+        </div>
+        <div>
+          <label for="requestId">requestId</label>
+          <input id="requestId" type="text" value="{{ defaults.requestId }}">
+        </div>
+      </div>
+      <div class="actions">
+        <button id="runBtn" type="button">Выполнить запрос</button>
+        <button id="mappingBtn" type="button">Показать маппинг</button>
+      </div>
+      <p class="muted">KrakenD: {{ krakend_url }} | GraphQL: {{ graphql_url }}</p>
+    </div>
+
+    <div class="panel" id="stepsPanel">
+      <h2>Шаги обработки</h2>
+      <div class="status" id="statusBox">Ожидание запроса</div>
+      <div class="timeline">
+        <div class="step">
+          <h3>Шаг 1: SOAP запрос -> KrakenD</h3>
+          <textarea id="stepSoap">{{ soap_preview }}</textarea>
+        </div>
+        <div class="step">
+          <h3>Шаг 2: KrakenD -> GraphQL</h3>
+          <textarea id="stepGraphql">{{ graphql_preview }}</textarea>
+        </div>
+        <div class="step">
+          <h3>Шаг 3: GraphQL ответ (JSON)</h3>
+          <textarea id="stepGraphqlResp"></textarea>
+        </div>
+        <div class="step">
+          <h3>Шаг 4: Маппинг -> SOAP ответ</h3>
+          <textarea id="stepSoapResp"></textarea>
+        </div>
+      </div>
+    </div>
+
+    <div class="panel" id="mappingPanel" style="display:none;">
+      <h2>Таблица маппинга</h2>
+      <h3>Маппинг входа (SOAP -> GraphQL variables)</h3>
+      <table>
+        <thead>
+          <tr>
+            <th>SOAP поле</th>
+            <th>GraphQL путь</th>
+          </tr>
+        </thead>
+        <tbody>
+          {% for row in input_rows %}
+          <tr>
+            <td>{{ row.soap }}</td>
+            <td>{{ row.graphql }}</td>
+          </tr>
+          {% endfor %}
+        </tbody>
+      </table>
+
+      <h3 style="margin-top:16px;">Маппинг выхода (GraphQL -> SOAP response)</h3>
+      <table>
+        <thead>
+          <tr>
+            <th>SOAP поле ответа</th>
+            <th>GraphQL путь</th>
+          </tr>
+        </thead>
+        <tbody>
+          {% for row in output_rows %}
+          <tr>
+            <td>{{ row.soap }}</td>
+            <td>{{ row.graphql }}</td>
+          </tr>
+          {% endfor %}
+        </tbody>
+      </table>
+    </div>
+
+    <div class="panel">
+      <h2>Результат</h2>
+      <div class="result-grid" id="resultGrid"></div>
+      <h3 style="margin-top:12px;">Ошибки</h3>
+      <pre id="errorsBox"></pre>
+    </div>
+  </div>
+
+  <script>
+    const mappingPanel = document.getElementById("mappingPanel");
+    const statusBox = document.getElementById("statusBox");
+    const stepSoap = document.getElementById("stepSoap");
+    const stepGraphql = document.getElementById("stepGraphql");
+    const stepGraphqlResp = document.getElementById("stepGraphqlResp");
+    const stepSoapResp = document.getElementById("stepSoapResp");
+    const errorsBox = document.getElementById("errorsBox");
+    const resultGrid = document.getElementById("resultGrid");
+
+    const clientIdEl = document.getElementById("clientId");
+    const firstNameEl = document.getElementById("firstName");
+    const lastNameEl = document.getElementById("lastName");
+    const requestIdEl = document.getElementById("requestId");
+
+    function escapeXml(value) {
+      return String(value)
+        .replace(/&/g, "&amp;")
+        .replace(/</g, "&lt;")
+        .replace(/>/g, "&gt;")
+        .replace(/\"/g, "&quot;")
+        .replace(/'/g, "&apos;");
+    }
+
+    function values() {
+      return {
+        clientId: Number(clientIdEl.value || 0),
+        firstName: firstNameEl.value || "",
+        lastName: lastNameEl.value || "",
+        requestId: requestIdEl.value || ""
+      };
+    }
+
+    function buildSoap(v) {
+      return `<?xml version="1.0" encoding="UTF-8"?>\n<soapenv:Envelope xmlns:soapenv="http://schemas.xmlsoap.org/soap/envelope/" xmlns:cx="urn:cx">\n  <soapenv:Header/>\n  <soapenv:Body>\n    <cx:GetCxRequest>\n      <cx:clientId>${escapeXml(v.clientId)}</cx:clientId>\n      <cx:firstName>${escapeXml(v.firstName)}</cx:firstName>\n      <cx:lastName>${escapeXml(v.lastName)}</cx:lastName>\n      <cx:requestId>${escapeXml(v.requestId)}</cx:requestId>\n    </cx:GetCxRequest>\n  </soapenv:Body>\n</soapenv:Envelope>\n`;
+    }
+
+    function renderResult(result) {
+      resultGrid.innerHTML = "";
+      const keys = ["status", "fullName", "score", "field01", "field02", "field03", "fault", "error"];
+      for (const key of keys) {
+        if (result[key] === undefined || result[key] === "") continue;
+        const div = document.createElement("div");
+        div.className = "result-item";
+        div.innerHTML = `<strong>${key}</strong>: ${String(result[key])}`;
+        resultGrid.appendChild(div);
+      }
+      if (!resultGrid.innerHTML) {
+        resultGrid.textContent = "Ключевые поля не извлечены.";
+      }
+    }
+
+    async function runDebug() {
+      const payload = values();
+      stepSoap.value = buildSoap(payload);
+      statusBox.textContent = "Выполнение запроса...";
+      errorsBox.textContent = "";
+
+      try {
+        const resp = await fetch("/debug-run", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify(payload)
+        });
+        const data = await resp.json();
+
+        statusBox.textContent = `HTTP SOAP: ${data.soapStatus}, HTTP GraphQL: ${data.graphqlStatus}`;
+        stepSoap.value = data.soapRequest || "";
+        stepGraphql.value = JSON.stringify(data.graphqlRequest || {}, null, 2);
+        stepGraphqlResp.value = JSON.stringify(data.graphqlResponse || {}, null, 2);
+        stepSoapResp.value = data.soapResponse || "";
+        errorsBox.textContent = JSON.stringify(data.errors || [], null, 2);
+        renderResult(data.result || {});
+      } catch (err) {
+        statusBox.textContent = `Ошибка: ${err.message}`;
+        errorsBox.textContent = err.message;
+      }
+    }
+
+    document.getElementById("runBtn").addEventListener("click", runDebug);
+    document.getElementById("mappingBtn").addEventListener("click", () => {
+      mappingPanel.style.display = mappingPanel.style.display === "none" ? "block" : "none";
+    });
+
+    [clientIdEl, firstNameEl, lastNameEl, requestIdEl].forEach((el) => {
+      el.addEventListener("input", () => {
+        stepSoap.value = buildSoap(values());
+      });
+    });
+
+    stepSoapResp.value = "";
+    stepGraphqlResp.value = "";
+    errorsBox.textContent = "[]";
+    renderResult({});
+  </script>
+</body>
+</html>

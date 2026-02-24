@@ -1,38 +1,41 @@
 services:
   krakend:
-    image: krakend:2.13
-    command: ["run", "-c", "/etc/krakend/krakend.json"]
+    platform: linux/amd64
+    build:
+      context: .
+      dockerfile: krakend/Dockerfile
     ports:
       - "8080:8080"
-    volumes:
-      - ./krakend/krakend.json:/etc/krakend/krakend.json:ro
-      - ./krakend/lua:/etc/krakend/lua:ro
     depends_on:
-      - web
-      - svc_a
-      - svc_b
-      - svc_c
+      - graphql_svc
 
-  web:
+  graphql_svc:
     build:
-      context: ./web
+      context: ./graphql_svc
     expose:
       - "8000"
 
   svc_a:
     build:
       context: ./svc_a
-    expose:
-      - "8000"
+    environment:
+      KRAKEND_URL: http://krakend:8080/soap/cx
+    ports:
+      - "8001:8001"
+    depends_on:
+      - krakend
 
-  svc_b:
+  web_ui:
     build:
-      context: ./svc_b
-    expose:
-      - "8000"
-
-  svc_c:
-    build:
-      context: ./svc_c
-    expose:
-      - "8000"
+      context: ./web_ui
+    environment:
+      KRAKEND_URL: http://krakend:8080/soap/cx
+      GRAPHQL_URL: http://graphql_svc:8000/graphql
+      MAPPING_FILE: /app/mapping.json
+    volumes:
+      - ./mapping.json:/app/mapping.json:ro
+    ports:
+      - "8002:8002"
+    depends_on:
+      - krakend
+      - graphql_svc
