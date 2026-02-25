@@ -49,8 +49,8 @@ services:
     build:
       context: ./web_ui
     environment:
-      KRAKEND_URL: http://krakend:8080/soap/cx
-      GRAPHQL_URL: http://graphql_svc:8000/graphql
+      KRAKEND_BROWSER_URL: http://localhost:8080/soap/cx
+      GRAPHQL_TARGET_URL: http://graphql_svc:8000/graphql
       MAPPING_FILE: /app/mapping.json
       JAEGER_UI_URL: http://localhost:16686
       OTLP_HTTP_ENDPOINT: http://jaeger:4318

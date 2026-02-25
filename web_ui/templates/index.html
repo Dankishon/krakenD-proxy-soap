@@ -3,7 +3,7 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>Демо: SOAP -> KrakenD -> GraphQL -> SOAP</title>
+  <title>Демо: Browser UI -> KrakenD -> GraphQL -> KrakenD -> Browser UI</title>
   <style>
     :root {
       --bg: #eef2ff;
@@ -129,6 +129,7 @@
       color: #334155;
       font-size: 14px;
       margin: 4px 0 0;
+      word-break: break-word;
     }
 
     table {
@@ -182,7 +183,7 @@
 <body>
   <div class="container">
     <h1>KrakenD Go plugin demo</h1>
-    <p class="muted">Поток: SOAP -> KrakenD (Go plugin) -> GraphQL -> SOAP</p>
+    <p class="muted">Основной поток: Browser UI -> KrakenD (SOAP XML) -> GraphQL -> KrakenD -> Browser UI</p>
 
     <div class="panel">
       <h2>Ввод параметров (SOAP)</h2>
@@ -208,19 +209,20 @@
         <button id="runBtn" type="button">Выполнить запрос</button>
         <button id="mappingBtn" type="button">Показать маппинг</button>
       </div>
-      <p class="muted">KrakenD: {{ krakend_url }} | GraphQL: {{ graphql_url }}</p>
+      <p class="muted">SOAP endpoint браузера: {{ krakend_browser_url }}</p>
+      <p class="muted">Целевой GraphQL endpoint (server-to-server): {{ graphql_target_url }}</p>
     </div>
 
-    <div class="panel" id="stepsPanel">
+    <div class="panel">
       <h2>Шаги обработки</h2>
       <div class="status" id="statusBox">Ожидание запроса</div>
       <div class="timeline">
         <div class="step">
-          <h3>Шаг 1: SOAP запрос -> KrakenD</h3>
+          <h3>Шаг 1: SOAP запрос (XML)</h3>
           <textarea id="stepSoap">{{ soap_preview }}</textarea>
         </div>
         <div class="step">
-          <h3>Шаг 2: KrakenD -> GraphQL</h3>
+          <h3>Шаг 2: GraphQL запрос (query + variables)</h3>
           <textarea id="stepGraphql">{{ graphql_preview }}</textarea>
         </div>
         <div class="step">
@@ -228,7 +230,7 @@
           <textarea id="stepGraphqlResp"></textarea>
         </div>
         <div class="step">
-          <h3>Шаг 4: Маппинг -> SOAP ответ</h3>
+          <h3>Шаг 4: SOAP ответ (XML)</h3>
           <textarea id="stepSoapResp"></textarea>
         </div>
       </div>
@@ -237,17 +239,18 @@
     <div class="panel">
       <h2>Трассировка (Jaeger)</h2>
       <div class="trace-grid">
-        <div class="result-item"><strong>Trace ID (web-ui)</strong><div id="traceWeb">-</div></div>
-        <div class="result-item"><strong>Trace ID (krakend)</strong><div id="traceKrakend">-</div></div>
-        <div class="result-item"><strong>Trace ID (graphql-svc)</strong><div id="traceGraphql">-</div></div>
+        <div class="result-item"><strong>Trace ID</strong><div id="traceId">-</div></div>
+        <div class="result-item"><strong>Статус GraphQL</strong><div id="gqlStatus">-</div></div>
+        <div class="result-item"><strong>Ошибка GraphQL</strong><div id="gqlError">-</div></div>
       </div>
       <div class="actions" style="margin-top: 12px;">
-        <a id="jaegerKrakend" class="link-btn" href="{{ jaeger_links.krakend }}" target="_blank" rel="noopener">Открыть krakend в Jaeger</a>
-        <a id="jaegerGraphql" class="link-btn" href="{{ jaeger_links.graphql }}" target="_blank" rel="noopener">Открыть graphql-svc в Jaeger</a>
-        <a id="jaegerWebUi" class="link-btn" href="{{ jaeger_links.web_ui }}" target="_blank" rel="noopener">Открыть web-ui в Jaeger</a>
+        <a id="traceLink" class="link-btn" href="{{ jaeger_search_krakend }}" target="_blank" rel="noopener">Открыть трассу в Jaeger</a>
+        <a class="link-btn" href="{{ jaeger_search_krakend }}" target="_blank" rel="noopener">Поиск krakend</a>
+        <a class="link-btn" href="{{ jaeger_search_graphql }}" target="_blank" rel="noopener">Поиск graphql-svc</a>
+        <a class="link-btn" href="{{ jaeger_search_web_ui }}" target="_blank" rel="noopener">Поиск web-ui</a>
       </div>
-      <p class="muted">Jaeger UI: {{ jaeger_ui_url }}. Если ссылка на конкретный trace недоступна, ищите по сервису и времени запроса.</p>
-      <p class="muted">Важно: browser DevTools не покажет server-to-server вызов KrakenD -> GraphQL, его нужно смотреть в Jaeger.</p>
+      <p class="muted">Jaeger UI: {{ jaeger_ui_url }}. Если точный trace недоступен, используйте поиск по сервису и времени.</p>
+      <p class="muted">Важно: browser DevTools не показывает вызов KrakenD -> GraphQL, он виден в Jaeger.</p>
     </div>
 
     <div class="panel" id="mappingPanel" style="display:none;">
@@ -293,11 +296,50 @@
       <h2>Результат</h2>
       <div class="result-grid" id="resultGrid"></div>
       <h3 style="margin-top:12px;">Ошибки</h3>
-      <pre id="errorsBox"></pre>
+      <pre id="errorsBox">[]</pre>
     </div>
   </div>
 
   <script>
+    const SOAP_ENDPOINT = {{ krakend_browser_url|tojson }};
+    const JAEGER_UI = {{ jaeger_ui_url|tojson }};
+    const GRAPHQL_QUERY = `query GetCxData($clientId:Int!,$firstName:String!,$lastName:String!,$requestId:String!){
+  getCxData(clientId:$clientId, firstName:$firstName, lastName:$lastName, requestId:$requestId){
+    clientId
+    requestId
+    status
+    fullName
+    score
+    field01
+    field02
+    field03
+    field04
+    field05
+    field06
+    field07
+    field08
+    field09
+    field10
+    field11
+    field12
+    field13
+    field14
+    field15
+    field16
+    field17
+    field18
+    field19
+    field20
+    field21
+    field22
+    field23
+    field24
+    field25
+    field26
+    field27
+  }
+}`;
+
     const mappingPanel = document.getElementById("mappingPanel");
     const statusBox = document.getElementById("statusBox");
     const stepSoap = document.getElementById("stepSoap");
@@ -306,14 +348,10 @@
     const stepSoapResp = document.getElementById("stepSoapResp");
     const errorsBox = document.getElementById("errorsBox");
     const resultGrid = document.getElementById("resultGrid");
-
-    const traceWeb = document.getElementById("traceWeb");
-    const traceKrakend = document.getElementById("traceKrakend");
-    const traceGraphql = document.getElementById("traceGraphql");
-
-    const jaegerKrakend = document.getElementById("jaegerKrakend");
-    const jaegerGraphql = document.getElementById("jaegerGraphql");
-    const jaegerWebUi = document.getElementById("jaegerWebUi");
+    const traceIdBox = document.getElementById("traceId");
+    const gqlStatusBox = document.getElementById("gqlStatus");
+    const gqlErrorBox = document.getElementById("gqlError");
+    const traceLink = document.getElementById("traceLink");
 
     const clientIdEl = document.getElementById("clientId");
     const firstNameEl = document.getElementById("firstName");
@@ -329,6 +367,31 @@
         .replace(/'/g, "&apos;");
     }
 
+    function randomHex(byteLength) {
+      const bytes = new Uint8Array(byteLength);
+      crypto.getRandomValues(bytes);
+      return Array.from(bytes, (b) => b.toString(16).padStart(2, "0")).join("");
+    }
+
+    function createTraceContext() {
+      const traceId = randomHex(16);
+      const spanId = randomHex(8);
+      return {
+        traceId,
+        traceparent: `00-${traceId}-${spanId}-01`
+      };
+    }
+
+    function decodeBase64Utf8(value) {
+      if (!value) return "";
+      try {
+        const bytes = Uint8Array.from(atob(value), (c) => c.charCodeAt(0));
+        return new TextDecoder().decode(bytes);
+      } catch (_) {
+        return "";
+      }
+    }
+
     function values() {
       return {
         clientId: Number(clientIdEl.value || 0),
@@ -342,10 +405,58 @@
       return `<?xml version="1.0" encoding="UTF-8"?>\n<soapenv:Envelope xmlns:soapenv="http://schemas.xmlsoap.org/soap/envelope/" xmlns:cx="urn:cx">\n  <soapenv:Header/>\n  <soapenv:Body>\n    <cx:GetCxRequest>\n      <cx:clientId>${escapeXml(v.clientId)}</cx:clientId>\n      <cx:firstName>${escapeXml(v.firstName)}</cx:firstName>\n      <cx:lastName>${escapeXml(v.lastName)}</cx:lastName>\n      <cx:requestId>${escapeXml(v.requestId)}</cx:requestId>\n    </cx:GetCxRequest>\n  </soapenv:Body>\n</soapenv:Envelope>\n`;
     }
 
+    function buildGraphQLRequest(v) {
+      return {
+        query: GRAPHQL_QUERY,
+        variables: {
+          clientId: v.clientId,
+          firstName: v.firstName,
+          lastName: v.lastName,
+          requestId: v.requestId
+        }
+      };
+    }
+
+    function textByLocalName(root, localName) {
+      const nodes = root.getElementsByTagNameNS("*", localName);
+      if (nodes.length > 0) {
+        return (nodes[0].textContent || "").trim();
+      }
+      const fallback = root.getElementsByTagName(localName);
+      if (fallback.length > 0) {
+        return (fallback[0].textContent || "").trim();
+      }
+      return "";
+    }
+
+    function parseSoapResult(soapXml) {
+      const parser = new DOMParser();
+      const doc = parser.parseFromString(soapXml, "text/xml");
+      if (doc.getElementsByTagName("parsererror").length > 0) {
+        return { error: "Невалидный SOAP ответ" };
+      }
+
+      const fault = textByLocalName(doc, "faultstring");
+      if (fault) {
+        return { fault };
+      }
+
+      const out = {};
+      for (const key of ["status", "fullName", "score", "field01", "field02", "field03"]) {
+        const value = textByLocalName(doc, key);
+        if (value) {
+          out[key] = value;
+        }
+      }
+      if (Object.keys(out).length === 0) {
+        out.info = "Ключевые поля не найдены";
+      }
+      return out;
+    }
+
     function renderResult(result) {
       resultGrid.innerHTML = "";
-      const keys = ["status", "fullName", "score", "field01", "field02", "field03", "fault", "error"];
-      for (const key of keys) {
+      for (const key of ["status", "fullName", "score", "field01", "field02", "field03", "fault", "error", "info"]) {
         if (result[key] === undefined || result[key] === "") continue;
         const div = document.createElement("div");
         div.className = "result-item";
@@ -353,71 +464,126 @@
         resultGrid.appendChild(div);
       }
       if (!resultGrid.innerHTML) {
-        resultGrid.textContent = "Ключевые поля не извлечены.";
+        resultGrid.textContent = "Пусто";
       }
     }
 
-    function renderTracing(tracing, responseTraceId) {
-      const webTrace = (tracing && tracing.traceId) || responseTraceId || "-";
-      const krakendTrace = (tracing && tracing.krakendTraceId) || "-";
-      const graphqlTrace = (tracing && tracing.graphqlTraceId) || "-";
-
-      traceWeb.textContent = webTrace;
-      traceKrakend.textContent = krakendTrace;
-      traceGraphql.textContent = graphqlTrace;
-
-      if (tracing && tracing.jaeger) {
-        jaegerKrakend.href = tracing.jaeger.krakend || jaegerKrakend.href;
-        jaegerGraphql.href = tracing.jaeger.graphql || jaegerGraphql.href;
-        jaegerWebUi.href = tracing.jaeger.web_ui || jaegerWebUi.href;
+    function updateTraceUI(traceId, gqlStatus, gqlError) {
+      traceIdBox.textContent = traceId || "-";
+      gqlStatusBox.textContent = gqlStatus || "-";
+      gqlErrorBox.textContent = gqlError || "-";
+      if (traceId && /^[a-f0-9]{32}$/.test(traceId)) {
+        traceLink.href = `${JAEGER_UI}/trace/${traceId}`;
+      } else {
+        traceLink.href = `${JAEGER_UI}/search?service=krakend`;
       }
     }
 
-    async function runDebug() {
+    async function runDirect() {
       const payload = values();
-      stepSoap.value = buildSoap(payload);
-      statusBox.textContent = "Выполнение запроса...";
-      errorsBox.textContent = "";
+      const soapBody = buildSoap(payload);
+      const localGraphQL = buildGraphQLRequest(payload);
+      const trace = createTraceContext();
+
+      stepSoap.value = soapBody;
+      stepGraphql.value = JSON.stringify(localGraphQL, null, 2);
+      stepGraphqlResp.value = "";
+      stepSoapResp.value = "";
+      errorsBox.textContent = "[]";
+      statusBox.textContent = "Выполнение запроса в KrakenD...";
+      renderResult({});
+      updateTraceUI(trace.traceId, "-", "-");
 
       try {
-        const resp = await fetch("/debug-run", {
+        const response = await fetch(SOAP_ENDPOINT, {
           method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify(payload)
+          headers: {
+            "Content-Type": "text/xml; charset=utf-8",
+            "traceparent": trace.traceparent,
+            "X-Trace-Id": trace.traceId
+          },
+          body: soapBody
         });
-        const data = await resp.json();
-        const responseTraceId = resp.headers.get("x-trace-id") || "";
 
-        statusBox.textContent = `HTTP SOAP: ${data.soapStatus}, HTTP GraphQL: ${data.graphqlStatus}, Trace ID: ${responseTraceId || "n/a"}`;
-        stepSoap.value = data.soapRequest || "";
-        stepGraphql.value = JSON.stringify(data.graphqlRequest || {}, null, 2);
-        stepGraphqlResp.value = JSON.stringify(data.graphqlResponse || {}, null, 2);
-        stepSoapResp.value = data.soapResponse || "";
-        errorsBox.textContent = JSON.stringify(data.errors || [], null, 2);
-        renderResult(data.result || {});
-        renderTracing(data.tracing || {}, responseTraceId);
+        const soapResponse = await response.text();
+        const hdrTraceId = response.headers.get("x-trace-id") || trace.traceId;
+        const gqlStatus = response.headers.get("x-graphql-status") || "UNKNOWN";
+        const gqlError = response.headers.get("x-graphql-error") || "";
+        const gqlQueryRaw = decodeBase64Utf8(response.headers.get("x-graphql-query") || "");
+        const gqlVarsRaw = decodeBase64Utf8(response.headers.get("x-graphql-vars") || "");
+        const gqlRespRaw = decodeBase64Utf8(response.headers.get("x-graphql-response") || "");
+
+        if (gqlQueryRaw || gqlVarsRaw) {
+          let parsedVars = {};
+          if (gqlVarsRaw) {
+            try {
+              parsedVars = JSON.parse(gqlVarsRaw);
+            } catch (_) {
+              parsedVars = { _raw: gqlVarsRaw, _parseError: "invalid JSON in X-GraphQL-Vars" };
+            }
+          }
+          stepGraphql.value = JSON.stringify(
+            {
+              query: gqlQueryRaw || localGraphQL.query,
+              variables: parsedVars
+            },
+            null,
+            2
+          );
+        }
+
+        if (gqlRespRaw) {
+          try {
+            stepGraphqlResp.value = JSON.stringify(JSON.parse(gqlRespRaw), null, 2);
+          } catch (_) {
+            stepGraphqlResp.value = gqlRespRaw;
+          }
+        } else {
+          stepGraphqlResp.value = JSON.stringify(
+            { status: gqlStatus, error: gqlError || null, note: "GraphQL ответ не передан в debug headers" },
+            null,
+            2
+          );
+        }
+
+        stepSoapResp.value = soapResponse;
+        const parsedSoap = parseSoapResult(soapResponse);
+        renderResult(parsedSoap);
+        updateTraceUI(hdrTraceId, gqlStatus, gqlError);
+
+        const errorList = [];
+        if (gqlError) {
+          errorList.push({ source: "KrakenD", message: gqlError });
+        }
+        if (parsedSoap.fault) {
+          errorList.push({ source: "SOAP Fault", message: parsedSoap.fault });
+        }
+        errorsBox.textContent = JSON.stringify(errorList, null, 2);
+
+        statusBox.textContent = `HTTP ${response.status}, GraphQL=${gqlStatus}, Trace=${hdrTraceId || "-"}`;
       } catch (err) {
-        statusBox.textContent = `Ошибка: ${err.message}`;
-        errorsBox.textContent = err.message;
+        statusBox.textContent = `Ошибка запроса: ${err.message}`;
+        stepGraphqlResp.value = JSON.stringify({ transportError: err.message }, null, 2);
+        errorsBox.textContent = JSON.stringify([{ source: "Browser", message: err.message }], null, 2);
+        updateTraceUI(trace.traceId, "ERROR", err.message);
       }
     }
 
-    document.getElementById("runBtn").addEventListener("click", runDebug);
+    document.getElementById("runBtn").addEventListener("click", runDirect);
     document.getElementById("mappingBtn").addEventListener("click", () => {
       mappingPanel.style.display = mappingPanel.style.display === "none" ? "block" : "none";
     });
 
     [clientIdEl, firstNameEl, lastNameEl, requestIdEl].forEach((el) => {
       el.addEventListener("input", () => {
-        stepSoap.value = buildSoap(values());
+        const v = values();
+        stepSoap.value = buildSoap(v);
+        stepGraphql.value = JSON.stringify(buildGraphQLRequest(v), null, 2);
       });
     });
 
-    stepSoapResp.value = "";
-    stepGraphqlResp.value = "";
-    errorsBox.textContent = "[]";
     renderResult({});
-    renderTracing({}, "");
+    updateTraceUI("", "-", "-");
   </script>
 </body>
 </html>

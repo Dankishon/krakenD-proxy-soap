@@ -11,6 +11,33 @@
     "router": {
       "return_error_msg": true
     },
+    "security/cors": {
+      "allow_origins": [
+        "http://localhost:8002",
+        "http://127.0.0.1:8002"
+      ],
+      "allow_methods": [
+        "POST",
+        "OPTIONS"
+      ],
+      "allow_headers": [
+        "Content-Type",
+        "SOAPAction",
+        "traceparent",
+        "tracestate",
+        "baggage",
+        "X-Trace-Id"
+      ],
+      "expose_headers": [
+        "Content-Type",
+        "X-Trace-Id",
+        "X-GraphQL-Query",
+        "X-GraphQL-Vars",
+        "X-GraphQL-Response",
+        "X-GraphQL-Status",
+        "X-GraphQL-Error"
+      ]
+    },
     "telemetry/opentelemetry": {
       "service_name": "krakend",
       "trace_sample_rate": 100,
@@ -70,7 +97,11 @@
       "output_encoding": "no-op",
       "input_headers": [
         "Content-Type",
-        "SOAPAction"
+        "SOAPAction",
+        "traceparent",
+        "tracestate",
+        "baggage",
+        "X-Trace-Id"
       ],
       "backend": [
         {

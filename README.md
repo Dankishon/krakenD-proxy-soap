@@ -2,59 +2,84 @@
 
 Полностью воспроизводимый pet-проект на Docker Compose.
 
-## Что демонстрируется
+Основной поток:
 
-- `svc_a` (legacy SOAP клиент) отправляет SOAP XML в `krakend`.
-- `krakend` через Go plugin:
-  1. читает SOAP request,
-  2. извлекает `clientId`, `firstName`, `lastName`, `requestId`,
-  3. формирует GraphQL JSON,
-  4. вызывает отдельный сервис `graphql_svc`,
-  5. маппит `data.getCxData.*` в SOAP response (32 поля),
-  6. возвращает SOAP XML клиенту.
-- Отдельного SOAP adapter сервиса нет. Конвертация SOAP<->GraphQL делается внутри KrakenD plugin.
-- End-to-end distributed tracing через OpenTelemetry + Jaeger.
+`Browser UI -> KrakenD (/soap/cx, SOAP XML) -> graphql_svc (/graphql) -> KrakenD -> Browser UI`
 
-## Сервисы
+Конвертация SOAP<->GraphQL выполняется **внутри KrakenD Go plugin**. Отдельного adapter-сервиса нет.
 
-- `krakend` -> [http://localhost:8080](http://localhost:8080)
-- `svc_a` -> [http://localhost:8001](http://localhost:8001)
-- `web_ui` -> [http://localhost:8002](http://localhost:8002)
-- `jaeger` -> [http://localhost:16686](http://localhost:16686)
-- `graphql_svc` -> внутри docker-сети `http://graphql_svc:8000/graphql`
-
-## Быстрый старт
+## Запуск
 
 ```bash
 docker compose up --build
 ```
 
-## Структура
+Сервисы:
 
-```text
-.
-├── docker-compose.yml
-├── mapping.json
-├── krakend
-│   ├── Dockerfile
-│   └── krakend.json
-├── plugin
-│   ├── go.mod
-│   └── main.go
-├── graphql_svc
-│   ├── Dockerfile
-│   └── main.py
-├── svc_a
-│   ├── Dockerfile
-│   ├── main.py
-│   └── templates/index.html
-├── web_ui
-│   ├── Dockerfile
-│   ├── main.py
-│   └── templates/index.html
-└── scripts
-    └── smoke.sh
-```
+- `krakend`: [http://localhost:8080](http://localhost:8080)
+- `graphql_svc`: внутри docker-сети `http://graphql_svc:8000/graphql`
+- `svc_a` (опциональный клиент): [http://localhost:8001](http://localhost:8001)
+- `web_ui` (основной UI): [http://localhost:8002](http://localhost:8002)
+- `jaeger`: [http://localhost:16686](http://localhost:16686)
+
+## Что делает KrakenD plugin
+
+Endpoint: `POST /soap/cx`
+
+1. Читает raw SOAP XML.
+2. Парсит `clientId`, `firstName`, `lastName`, `requestId`.
+3. Формирует GraphQL JSON:
+   - `query GetCxData(...)`
+   - `variables`
+4. Вызывает отдельный `graphql_svc` по HTTP POST `/graphql`.
+5. Читает JSON `data.getCxData`.
+6. Применяет `mapping.json`.
+7. Возвращает SOAP XML (32 поля: `clientId`, `requestId`, `status`, `fullName`, `score`, `field01..field27`).
+8. При ошибке GraphQL возвращает SOAP Fault и HTTP `500`.
+
+## Debug headers для UI (Шаги 2-3)
+
+KrakenD добавляет в ответ:
+
+- `X-Trace-Id`
+- `X-GraphQL-Query` (base64)
+- `X-GraphQL-Vars` (base64 JSON)
+- `X-GraphQL-Response` (base64 JSON)
+- `X-GraphQL-Status` (`OK` или `ERROR`)
+- `X-GraphQL-Error` (при ошибке)
+
+`web_ui` декодирует эти заголовки и отображает:
+
+- Шаг 1: SOAP запрос
+- Шаг 2: GraphQL запрос (query + variables)
+- Шаг 3: GraphQL ответ (JSON)
+- Шаг 4: SOAP ответ
+
+## CORS
+
+В `krakend.json` включён `security/cors` для browser запроса с `http://localhost:8002`:
+
+- methods: `POST`, `OPTIONS`
+- allow headers: `Content-Type`, `SOAPAction`, `traceparent`, `tracestate`, `baggage`, `X-Trace-Id`
+- expose headers: debug headers (`X-GraphQL-*`, `X-Trace-Id`)
+
+## Tracing (OpenTelemetry + Jaeger)
+
+Инструментировано:
+
+- `krakend` (`telemetry/opentelemetry`)
+- `graphql_svc` (FastAPI + OTLP exporter)
+- `web_ui` (FastAPI + OTLP exporter)
+- `svc_a` (FastAPI + OTLP exporter, опционально)
+
+Чтобы упростить корреляцию, `web_ui` создаёт `traceparent` и отправляет его в KrakenD.
+
+В UI есть кнопка:
+
+- `Открыть трассу в Jaeger` -> `http://localhost:16686/trace/<traceId>` (если `traceId` известен)
+- иначе ссылка ведёт на поиск по сервису `krakend`
+
+Важно: browser DevTools не показывает server-to-server вызов `KrakenD -> GraphQL`. Этот участок виден в Jaeger.
 
 ## SOAP контракт (SOAP 1.1)
 
@@ -65,106 +90,46 @@ Namespaces:
 - `soapenv`: `http://schemas.xmlsoap.org/soap/envelope/`
 - `cx`: `urn:cx`
 
-### SOAP request поля
+Request поля:
 
 - `clientId` (int)
 - `firstName` (string)
 - `lastName` (string)
 - `requestId` (string)
 
-### SOAP response поля (32)
+Response поля (32):
 
-- `clientId`
-- `requestId`
-- `status`
-- `fullName`
-- `score`
-- `field01..field27`
+- `clientId`, `requestId`, `status`, `fullName`, `score`, `field01..field27`
 
-### SOAP Fault
-
-Если GraphQL вернул `errors`, KrakenD возвращает:
-
-- HTTP `500`
-- SOAP Fault (`faultcode=soapenv:Server`)
-
-## GraphQL
+## GraphQL сервис
 
 Endpoint: `POST http://graphql_svc:8000/graphql`
 
-Поведение:
+Логика:
 
 - `status = "OK"`
 - `fullName = firstName + " " + lastName`
 - `score = clientId * 1.23`
 - `field01..field27 = "value-<n>-<requestId>"`
-- при `clientId = -1` GraphQL возвращает ошибку
+- `clientId = -1` -> GraphQL error (демо)
 
-## mapping.json (source of truth)
+## mapping.json
 
-- `input`: SOAP поля -> GraphQL variables
-- `output`: GraphQL path -> SOAP поля ответа
+`mapping.json` — единый источник правды:
 
-Go plugin загружает этот файл при старте и применяет его в рантайме.
+- `input`: SOAP -> GraphQL variables
+- `output`: GraphQL path -> SOAP response fields
 
-## Tracing (OpenTelemetry + Jaeger)
+Плагин читает этот файл при старте KrakenD.
 
-### Что инструментировано
-
-- `krakend`: `telemetry/opentelemetry` в `krakend.json`, OTLP HTTP export в `jaeger:4318`.
-- `svc_a`, `graphql_svc`, `web_ui`: `opentelemetry-sdk`, FastAPI + requests instrumentation.
-- Go plugin:
-  - прокидывает `traceparent`, `tracestate`, `baggage` в вызов `graphql_svc`;
-  - возвращает `X-Trace-Id` в ответе;
-  - пишет trace id в лог.
-
-### Service names в Jaeger
-
-- `svc-a`
-- `krakend`
-- `graphql-svc`
-- `web-ui`
-
-### Как проверить tracing
-
-1. Запустить стек: `docker compose up --build`
-2. Открыть `web_ui`: [http://localhost:8002](http://localhost:8002)
-3. Нажать «Выполнить запрос»
-4. Открыть Jaeger UI: [http://localhost:16686](http://localhost:16686)
-5. В поиске выбрать `krakend` или `graphql-svc` и интервал `Last 15 minutes`
-
-Важно: browser DevTools не показывает server-to-server вызов `KrakenD -> GraphQL`. Этот участок виден только в Jaeger.
-
-## UI
-
-### svc_a (`:8001`)
-
-- `GET /` — русская форма SOAP клиента
-- `POST /call` — отправка SOAP в KrakenD
-- Выводит SOAP запрос, HTTP статус, SOAP ответ, расшифровку и trace id
-
-### web_ui (`:8002`)
-
-- Русский интерфейс для демонстрации пайплайна
-- Блоки:
-  - ввод параметров,
-  - шаги обработки (SOAP -> GraphQL -> JSON -> SOAP),
-  - трассировка (Jaeger + trace id),
-  - таблица маппинга,
-  - результат (status/fullName/score/field01/field02/field03)
-- Endpoint `POST /debug-run`:
-  - формирует SOAP request,
-  - вызывает KrakenD,
-  - делает прямой вызов GraphQL для показа raw JSON,
-  - возвращает шаги и trace id для UI.
-
-## Проверка curl
+## Проверка curl (прямо в KrakenD)
 
 Успех:
 
 ```bash
-curl -sS -X POST http://localhost:8080/soap/cx \
+curl -si -X POST http://localhost:8080/soap/cx \
   -H 'Content-Type: text/xml; charset=utf-8' \
+  -H 'traceparent: 00-1234567890abcdef1234567890abcdef-1234567890abcdef-01' \
   --data '<?xml version="1.0" encoding="UTF-8"?>
 <soapenv:Envelope xmlns:soapenv="http://schemas.xmlsoap.org/soap/envelope/" xmlns:cx="urn:cx">
   <soapenv:Body>
@@ -178,7 +143,7 @@ curl -sS -X POST http://localhost:8080/soap/cx \
 </soapenv:Envelope>'
 ```
 
-Ошибка (GraphQL -> SOAP Fault):
+Ошибка (SOAP Fault):
 
 ```bash
 curl -si -X POST http://localhost:8080/soap/cx \
@@ -196,7 +161,7 @@ curl -si -X POST http://localhost:8080/soap/cx \
 </soapenv:Envelope>'
 ```
 
-## Smoke тесты
+## Smoke test
 
 ```bash
 ./scripts/smoke.sh
@@ -204,7 +169,8 @@ curl -si -X POST http://localhost:8080/soap/cx \
 
 Скрипт:
 
-1. поднимает compose,
-2. проверяет успешный SOAP ответ,
-3. проверяет SOAP Fault для `clientId=-1`,
-4. даёт подсказку открыть Jaeger UI.
+1. Поднимает compose.
+2. Проверяет успешный SOAP response.
+3. Проверяет debug headers (`X-GraphQL-*`, `X-Trace-Id`).
+4. Проверяет SOAP Fault для `clientId=-1`.
+5. Даёт подсказку открыть Jaeger.

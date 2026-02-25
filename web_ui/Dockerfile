@@ -6,12 +6,10 @@ RUN pip install --no-cache-dir \
     fastapi \
     uvicorn \
     jinja2 \
-    requests \
     opentelemetry-api \
     opentelemetry-sdk \
     opentelemetry-exporter-otlp \
-    opentelemetry-instrumentation-fastapi \
-    opentelemetry-instrumentation-requests
+    opentelemetry-instrumentation-fastapi
 
 COPY main.py /app/main.py
 COPY templates /app/templates

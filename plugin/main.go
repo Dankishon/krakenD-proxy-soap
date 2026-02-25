@@ -3,6 +3,7 @@ package main
 import (
 	"bytes"
 	"context"
+	"encoding/base64"
 	"encoding/json"
 	"encoding/xml"
 	"fmt"
@@ -245,50 +246,63 @@ func handleSOAPRequest(
 
 	soapBody, err := io.ReadAll(io.LimitReader(req.Body, 1<<20))
 	if err != nil {
+		setGraphQLErrorHeaders(w, "cannot read SOAP body")
 		writeSOAPFault(w, http.StatusBadRequest, "не удалось прочитать SOAP тело", traceID)
 		return
 	}
 	if len(bytes.TrimSpace(soapBody)) == 0 {
+		setGraphQLErrorHeaders(w, "SOAP body is empty")
 		writeSOAPFault(w, http.StatusBadRequest, "SOAP тело пустое", traceID)
 		return
 	}
 
 	input, err := parseSOAPInput(soapBody)
 	if err != nil {
+		setGraphQLErrorHeaders(w, "invalid SOAP input: "+err.Error())
 		writeSOAPFault(w, http.StatusBadRequest, "некорректный SOAP запрос: "+err.Error(), traceID)
 		return
 	}
 
 	variables, err := buildVariables(input, mapping)
 	if err != nil {
+		setGraphQLErrorHeaders(w, "input mapping failed: "+err.Error())
 		writeSOAPFault(w, http.StatusBadRequest, "ошибка маппинга входа: "+err.Error(), traceID)
 		return
 	}
+	setBase64Header(w, "X-GraphQL-Query", gqlQuery)
+	setJSONBase64Header(w, "X-GraphQL-Vars", variables)
 
 	gqlPayload, err := json.Marshal(map[string]interface{}{
 		"query":     gqlQuery,
 		"variables": variables,
 	})
 	if err != nil {
+		setGraphQLErrorHeaders(w, "cannot build GraphQL payload")
 		writeSOAPFault(w, http.StatusInternalServerError, "ошибка сборки GraphQL запроса", traceID)
 		return
 	}
 
 	gqlRespBody, gqlStatus, err := callGraphQL(req.Context(), client, cfg.GraphQLURL, gqlPayload, req.Header)
 	if err != nil {
+		setGraphQLErrorHeaders(w, "graphql call failed: "+err.Error())
 		writeSOAPFault(w, http.StatusInternalServerError, "ошибка вызова GraphQL: "+err.Error(), traceID)
 		return
 	}
+	setBase64Header(w, "X-GraphQL-Response", string(gqlRespBody))
 	if gqlStatus < 200 || gqlStatus >= 300 {
+		msg := fmt.Sprintf("GraphQL returned HTTP %d", gqlStatus)
+		setGraphQLErrorHeaders(w, msg)
 		writeSOAPFault(w, http.StatusInternalServerError, fmt.Sprintf("GraphQL вернул HTTP %d", gqlStatus), traceID)
 		return
 	}
 
 	soapFields, err := mapGraphQLToSOAP(gqlRespBody, mapping)
 	if err != nil {
+		setGraphQLErrorHeaders(w, err.Error())
 		writeSOAPFault(w, http.StatusInternalServerError, err.Error(), traceID)
 		return
 	}
+	w.Header().Set("X-GraphQL-Status", "OK")
 
 	if traceID != "" {
 		logger.Info(fmt.Sprintf("[soap-graphql-plugin] clientId=%d requestId=%s trace_id=%s", input.ClientID, input.RequestID, traceID))
@@ -513,6 +527,48 @@ func writeSOAPFault(w http.ResponseWriter, status int, message string, traceID s
 	}
 	w.WriteHeader(status)
 	_, _ = w.Write([]byte(fault))
+}
+
+func setGraphQLErrorHeaders(w http.ResponseWriter, message string) {
+	w.Header().Set("X-GraphQL-Status", "ERROR")
+	if strings.TrimSpace(message) != "" {
+		safe := sanitizeHeaderValue(message)
+		if safe != "" {
+			w.Header().Set("X-GraphQL-Error", safe)
+		}
+	}
+}
+
+func setBase64Header(w http.ResponseWriter, name string, value string) {
+	if strings.TrimSpace(value) == "" {
+		return
+	}
+	w.Header().Set(name, base64.StdEncoding.EncodeToString([]byte(value)))
+}
+
+func setJSONBase64Header(w http.ResponseWriter, name string, payload interface{}) {
+	raw, err := json.Marshal(payload)
+	if err != nil {
+		return
+	}
+	setBase64Header(w, name, string(raw))
+}
+
+func sanitizeHeaderValue(value string) string {
+	var out strings.Builder
+	for _, r := range value {
+		if r >= 32 && r <= 126 {
+			out.WriteRune(r)
+			continue
+		}
+		switch r {
+		case '\t':
+			out.WriteRune(r)
+		case '\n', '\r':
+			out.WriteRune(' ')
+		}
+	}
+	return strings.TrimSpace(out.String())
 }
 
 func buildSOAPFault(message string) string {

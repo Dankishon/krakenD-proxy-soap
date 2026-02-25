@@ -24,8 +24,11 @@ SOAP_OK='<?xml version="1.0" encoding="UTF-8"?>
 </soapenv:Envelope>'
 
 OK_FILE="/tmp/soap_ok.xml"
+OK_HEADERS="/tmp/soap_ok.headers"
 OK_STATUS="$(curl -sS -o "$OK_FILE" -w "%{http_code}" \
+  -D "$OK_HEADERS" \
   -H "Content-Type: text/xml; charset=utf-8" \
+  -H "traceparent: 00-1234567890abcdef1234567890abcdef-1234567890abcdef-01" \
   -X POST "http://localhost:8080/soap/cx" \
   --data "$SOAP_OK")"
 
@@ -40,6 +43,11 @@ grep -q "<soapenv:Envelope" "$OK_FILE"
 grep -q "<cx:status>OK</cx:status>" "$OK_FILE"
 grep -q "<cx:fullName>Jane Doe</cx:fullName>" "$OK_FILE"
 grep -q "<cx:field01>value-1-smoke-ok-001</cx:field01>" "$OK_FILE"
+grep -qi "^X-Trace-Id:" "$OK_HEADERS"
+grep -qi "^X-GraphQL-Status: OK" "$OK_HEADERS"
+grep -qi "^X-GraphQL-Query:" "$OK_HEADERS"
+grep -qi "^X-GraphQL-Vars:" "$OK_HEADERS"
+grep -qi "^X-GraphQL-Response:" "$OK_HEADERS"
 
 SOAP_ERR='<?xml version="1.0" encoding="UTF-8"?>
 <soapenv:Envelope xmlns:soapenv="http://schemas.xmlsoap.org/soap/envelope/" xmlns:cx="urn:cx">
@@ -54,8 +62,11 @@ SOAP_ERR='<?xml version="1.0" encoding="UTF-8"?>
 </soapenv:Envelope>'
 
 ERR_FILE="/tmp/soap_err.xml"
+ERR_HEADERS="/tmp/soap_err.headers"
 ERR_STATUS="$(curl -sS -o "$ERR_FILE" -w "%{http_code}" \
+  -D "$ERR_HEADERS" \
   -H "Content-Type: text/xml; charset=utf-8" \
+  -H "traceparent: 00-abcdefabcdefabcdefabcdefabcdefab-abcdefabcdefabcd-01" \
   -X POST "http://localhost:8080/soap/cx" \
   --data "$SOAP_ERR")"
 
@@ -68,6 +79,8 @@ fi
 
 grep -q "<soapenv:Fault>" "$ERR_FILE"
 grep -q "GraphQL error" "$ERR_FILE"
+grep -qi "^X-GraphQL-Status: ERROR" "$ERR_HEADERS"
+grep -qi "^X-GraphQL-Error:" "$ERR_HEADERS"
 
 echo "[smoke] waiting 2s for traces export"
 sleep 2
